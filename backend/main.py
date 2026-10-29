@@ -1,12 +1,20 @@
-from fastapi import FastAPI, HTTPException, UploadFile, File, Form
+from fastapi import FastAPI, HTTPException, UploadFile, File, Form, Depends
+from fastapi.middleware.cors import CORSMiddleware
 from openai import AuthenticationError, RateLimitError, APIConnectionError, APIStatusError
 from config import get_settings
+from auth import verify_api_key
 from meta_client import get_meta_client
 import base64
 import json
 import httpx
 
 app = FastAPI()
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=get_settings().cors_origins,
+    allow_methods=["GET", "POST"],
+    allow_headers=["X-API-Key", "Content-Type"],
+)
 ALLOWED_TYPES = ["image/png", "image/gif", "image/webp", "image/jpeg"]
 ALLOWED_AUDIO_TYPES = ["audio/wav", "audio/x-wav", "audio/wave"]
 MAX_AUDIO_BYTES = 5 * 1024 * 1024
@@ -17,7 +25,7 @@ MODEL_INSTRUCTIONS = "You help a blind or low-vision user understand their surro
 def hello_world():
     return {"message":"Hello World"}
 
-@app.get("/ai/ping")
+@app.get("/ai/ping", dependencies=[Depends(verify_api_key)])
 def ping():
     settings = get_settings()
     try:
@@ -33,7 +41,7 @@ def ping():
 
     return {"model": settings.meta_model, "reply":resp.output_text}
 
-@app.post("/ai/describe")
+@app.post("/ai/describe", dependencies=[Depends(verify_api_key)])
 def describe(image: UploadFile, question: str = Form("Describe what is in front of me")):
     if image.content_type not in ALLOWED_TYPES:
         raise HTTPException(status_code=415, detail="Image is not of a supported type")
@@ -69,7 +77,7 @@ def describe(image: UploadFile, question: str = Form("Describe what is in front 
 
     return {"answer": resp.output_text}
 
-@app.post("/ai/transcribe")
+@app.post("/ai/transcribe", dependencies=[Depends(verify_api_key)])
 def transcribe(audio: UploadFile):
     if audio.content_type not in ALLOWED_AUDIO_TYPES:
         raise HTTPException(status_code=415, detail="Audio is not of a supported type, WAV is required")
