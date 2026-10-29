@@ -19,7 +19,7 @@ ALLOWED_TYPES = ["image/png", "image/gif", "image/webp", "image/jpeg"]
 ALLOWED_AUDIO_TYPES = ["audio/wav", "audio/x-wav", "audio/wave"]
 MAX_AUDIO_BYTES = 5 * 1024 * 1024
 MAX_IMAGE_BYTES = 5 * 1024 * 1024
-MODEL_INSTRUCTIONS = "You help a blind or low-vision user understand their surroundings. Reply in the language of the question. Use short, clear sentences. Mention the most important or safety-relevant thing first. Do not guess; if something is unclear, say so."
+MODEL_INSTRUCTIONS = "You help a blind or low-vision user understand their surroundings. Reply in the language of the question. Use short, clear sentences. Mention the most important thing first. Only mention hazards you can clearly see in the image. Never say that a place, object, food or situation is safe, because a photo cannot guarantee that. Do not guess; if something is unclear, say so."
 
 @app.get("/")
 def hello_world():
