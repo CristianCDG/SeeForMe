@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState, useSyncExternalStore, type ChangeEvent } from "react";
+import { useEffect, useRef, useState, useSyncExternalStore, type ChangeEvent } from "react";
 import { resizeImage } from "@/lib/image";
 import { getMessages } from "@/lib/messages";
 import { startRecording, type Recording } from "@/lib/recorder";
@@ -37,6 +37,10 @@ export default function Assistant() {
   const timerRef = useRef<number | undefined>(undefined);
   const [status, setStatus] = useState<Status>("idle");
   const [text, setText] = useState("");
+
+  useEffect(() => {
+    document.documentElement.lang = language;
+  }, [language]);
 
   function say(value: string) {
     setText(value);
@@ -103,6 +107,16 @@ export default function Assistant() {
     await beginListening();
   }
 
+  function takeNewPhoto() {
+    stopSpeaking();
+    inputRef.current?.click();
+  }
+
+  function askAnother() {
+    stopSpeaking();
+    void beginListening();
+  }
+
   function handleTap() {
     if (status === "thinking") return;
     if (status === "listening") {
@@ -110,40 +124,53 @@ export default function Assistant() {
       else stopSpeaking();
       return;
     }
-    stopSpeaking();
-    inputRef.current?.click();
+    takeNewPhoto();
   }
 
-  const label =
-    status === "answered"
-      ? `${text}. ${messages.tapAgain}`
-      : status === "idle"
-        ? messages.tapToPhoto
-        : text;
-
   return (
-    <main className="flex flex-1 flex-col">
+    <main className="flex flex-1 flex-col bg-black">
       <h1 className="sr-only">SeeForMe</h1>
-      <button
-        type="button"
-        onClick={handleTap}
-        aria-label={label}
-        aria-busy={status === "thinking"}
-        className="flex flex-1 w-full flex-col items-center justify-center gap-6 overflow-y-auto bg-black p-6 text-center text-yellow-300 focus-visible:outline-8 focus-visible:outline-white"
-      >
-        <span className="text-5xl font-bold">SeeForMe</span>
-        <span className="max-w-2xl text-3xl leading-snug">
-          {status === "idle" ? messages.tapToPhoto : text}
-        </span>
-        {status === "listening" && (
-          <span className="text-2xl text-red-400" aria-hidden="true">
-            ●
+      {status === "answered" ? (
+        <>
+          <p className="flex flex-1 basis-1/3 items-center justify-center overflow-y-auto p-6 text-center text-3xl leading-snug text-yellow-300">
+            {text}
+          </p>
+          <button
+            type="button"
+            onClick={askAnother}
+            className="flex-1 bg-yellow-300 p-6 text-3xl font-bold text-black focus-visible:outline-8 focus-visible:outline-white"
+          >
+            {messages.askAnother}
+          </button>
+          <button
+            type="button"
+            onClick={takeNewPhoto}
+            className="flex-1 bg-white p-6 text-3xl font-bold text-black focus-visible:outline-8 focus-visible:outline-yellow-300"
+          >
+            {messages.newPhoto}
+          </button>
+        </>
+      ) : (
+        <button
+          type="button"
+          onClick={handleTap}
+          aria-busy={status === "thinking"}
+          className="flex flex-1 w-full flex-col items-center justify-center gap-6 overflow-y-auto bg-black p-6 text-center text-yellow-300 focus-visible:outline-8 focus-visible:outline-white"
+        >
+          <span className="text-5xl font-bold">SeeForMe</span>
+          <span className="max-w-2xl text-3xl leading-snug">
+            {status === "idle" ? messages.tapToPhoto : text}
           </span>
-        )}
-        {status === "answered" && (
-          <span className="text-2xl text-white">{messages.tapAgain}</span>
-        )}
-      </button>
+          {status === "idle" && (
+            <span className="max-w-xl text-2xl leading-snug text-white">{messages.intro}</span>
+          )}
+          {status === "listening" && (
+            <span className="text-2xl text-red-400" aria-hidden="true">
+              ●
+            </span>
+          )}
+        </button>
+      )}
       <input
         ref={inputRef}
         type="file"
