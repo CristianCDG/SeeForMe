@@ -3,7 +3,9 @@ from fastapi.middleware.cors import CORSMiddleware
 from openai import AuthenticationError, RateLimitError, APIConnectionError, APIStatusError
 from config import get_settings
 from auth import verify_api_key
+from rate_limit import enforce_rate_limit
 from meta_client import get_meta_client
+from pydantic import BaseModel, Field, ValidationError, TypeAdapter
 import base64
 import json
 import httpx
@@ -19,13 +21,23 @@ ALLOWED_TYPES = ["image/png", "image/gif", "image/webp", "image/jpeg"]
 ALLOWED_AUDIO_TYPES = ["audio/wav", "audio/x-wav", "audio/wave"]
 MAX_AUDIO_BYTES = 5 * 1024 * 1024
 MAX_IMAGE_BYTES = 5 * 1024 * 1024
+MAX_HISTORY_TURNS = 6
+GUARDED = [Depends(verify_api_key), Depends(enforce_rate_limit)]
+
+
+class Turn(BaseModel):
+    question: str = Field(max_length=1000)
+    answer: str = Field(max_length=4000)
+
+
+history_adapter = TypeAdapter(list[Turn])
 MODEL_INSTRUCTIONS = "You help a blind or low-vision user understand their surroundings. Reply in the language of the question. Use short, clear sentences. Mention the most important thing first. Only mention hazards you can clearly see in the image. Never say that a place, object, food or situation is safe, because a photo cannot guarantee that. Do not guess; if something is unclear, say so."
 
 @app.get("/")
 def hello_world():
     return {"message":"Hello World"}
 
-@app.get("/ai/ping", dependencies=[Depends(verify_api_key)])
+@app.get("/ai/ping", dependencies=GUARDED)
 def ping():
     settings = get_settings()
     try:
@@ -41,8 +53,21 @@ def ping():
 
     return {"model": settings.meta_model, "reply":resp.output_text}
 
-@app.post("/ai/describe", dependencies=[Depends(verify_api_key)])
-def describe(image: UploadFile, question: str = Form("Describe what is in front of me")):
+@app.post("/ai/describe", dependencies=GUARDED)
+def describe(
+    image: UploadFile,
+    question: str = Form("Describe what is in front of me"),
+    history: str = Form("[]"),
+):
+    try:
+        turns = history_adapter.validate_json(history)
+    except ValidationError:
+        raise HTTPException(status_code=422, detail="History is not valid")
+    messages = []
+    for turn in turns[-MAX_HISTORY_TURNS:]:
+        messages.append({"role": "user", "content": turn.question})
+        messages.append({"role": "assistant", "content": turn.answer})
+
     if image.content_type not in ALLOWED_TYPES:
         raise HTTPException(status_code=415, detail="Image is not of a supported type")
     data = image.file.read(MAX_IMAGE_BYTES + 1)
@@ -56,13 +81,16 @@ def describe(image: UploadFile, question: str = Form("Describe what is in front 
         resp = get_meta_client().responses.create(
             model=settings.meta_model,
             instructions=MODEL_INSTRUCTIONS,
-            input=[{
-                "role": "user",
-                "content": [
-                    {"type": "input_text", "text": question},
-                    {"type": "input_image", "image_url": data_url},
-                ],
-            }],
+            input=[
+                *messages,
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "input_text", "text": question},
+                        {"type": "input_image", "image_url": data_url},
+                    ],
+                },
+            ],
             reasoning={"effort": settings.meta_reasoning_effort},
             max_output_tokens=800,
         )
@@ -77,7 +105,7 @@ def describe(image: UploadFile, question: str = Form("Describe what is in front 
 
     return {"answer": resp.output_text}
 
-@app.post("/ai/transcribe", dependencies=[Depends(verify_api_key)])
+@app.post("/ai/transcribe", dependencies=GUARDED)
 def transcribe(audio: UploadFile):
     if audio.content_type not in ALLOWED_AUDIO_TYPES:
         raise HTTPException(status_code=415, detail="Audio is not of a supported type, WAV is required")

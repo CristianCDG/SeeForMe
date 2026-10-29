@@ -8,6 +8,7 @@ import { speak, stopSpeaking } from "@/lib/speech";
 import { toWav } from "@/lib/wav";
 
 type Status = "idle" | "listening" | "thinking" | "answered" | "error";
+type Turn = { question: string; answer: string };
 
 const MAX_RECORDING_MS = 20_000;
 
@@ -33,6 +34,7 @@ export default function Assistant() {
   const messages = getMessages(language);
   const inputRef = useRef<HTMLInputElement>(null);
   const imageRef = useRef<Blob | null>(null);
+  const historyRef = useRef<Turn[]>([]);
   const recordingRef = useRef<Recording | null>(null);
   const timerRef = useRef<number | undefined>(undefined);
   const [status, setStatus] = useState<Status>("idle");
@@ -54,11 +56,13 @@ export default function Assistant() {
       const form = new FormData();
       form.append("image", image, "photo.jpg");
       form.append("question", question);
+      form.append("history", JSON.stringify(historyRef.current));
 
       const response = await fetch("/api/describe", { method: "POST", body: form });
       if (!response.ok) throw new Error(`Request failed with status ${response.status}`);
 
       const data: { answer: string } = await response.json();
+      historyRef.current = [...historyRef.current, { question, answer: data.answer }];
       setStatus("answered");
       say(data.answer);
     } catch {
@@ -99,6 +103,7 @@ export default function Assistant() {
 
     try {
       imageRef.current = await resizeImage(file);
+      historyRef.current = [];
     } catch {
       setStatus("error");
       say(messages.error);
