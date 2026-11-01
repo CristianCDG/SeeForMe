@@ -1,4 +1,5 @@
-const SPEECH_TIMEOUT_MS = 8_000;
+const MIN_SPEECH_TIMEOUT_MS = 8_000;
+const SPEECH_MS_PER_CHARACTER = 120;
 
 function synthesis() {
   if (typeof window === "undefined" || !("speechSynthesis" in window)) {
@@ -15,7 +16,10 @@ export function speak(text: string, language: string): Promise<void> {
   return new Promise((resolve) => {
     const utterance = new SpeechSynthesisUtterance(text);
     utterance.lang = language;
-    const timeout = window.setTimeout(resolve, SPEECH_TIMEOUT_MS);
+    const timeout = window.setTimeout(
+      resolve,
+      Math.max(MIN_SPEECH_TIMEOUT_MS, text.length * SPEECH_MS_PER_CHARACTER),
+    );
     const finish = () => {
       window.clearTimeout(timeout);
       resolve();

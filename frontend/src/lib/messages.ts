@@ -2,7 +2,9 @@ const messages = {
   en: {
     tapToPhoto: "Tap anywhere to take a photo",
     intro: "Take a photo of what is around you, then ask your question out loud and I will answer by voice.",
-    aimCamera: "Camera ready. Point it at what you want to know about, then tap anywhere to take the photo.",
+    aimCamera: "Camera ready. Point it at what you want to know about. I will take the photo in a few seconds, or tap anywhere to take it now.",
+    followUpPrompt: "You can ask another question, or say new photo.",
+    standBy: "I am here when you need me. Use the buttons to ask another question or take a new photo.",
     noCamera: "I could not open the camera. Tap anywhere to use your phone's camera app instead.",
     askAnother: "Ask another question about this photo",
     newPhoto: "Take a new photo",
@@ -16,7 +18,9 @@ const messages = {
   es: {
     tapToPhoto: "Toca en cualquier parte para tomar una foto",
     intro: "Toma una foto de lo que tienes alrededor, luego haz tu pregunta en voz alta y te responderé hablando.",
-    aimCamera: "Cámara lista. Apunta hacia lo que quieres conocer y toca en cualquier parte para tomar la foto.",
+    aimCamera: "Cámara lista. Apunta hacia lo que quieres conocer. Tomaré la foto en unos segundos, o toca en cualquier parte para tomarla ya.",
+    followUpPrompt: "Puedes hacer otra pregunta, o decir nueva foto.",
+    standBy: "Aquí estoy cuando me necesites. Usa los botones para hacer otra pregunta o tomar una foto nueva.",
     noCamera: "No pude abrir la cámara. Toca en cualquier parte para usar la aplicación de cámara de tu teléfono.",
     askAnother: "Hacer otra pregunta sobre esta foto",
     newPhoto: "Tomar una foto nueva",

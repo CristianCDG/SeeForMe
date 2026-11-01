@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState, useSyncExternalStore, type ChangeEvent } from "react";
 import { startCamera, type Camera } from "@/lib/camera";
+import { isNewPhotoCommand } from "@/lib/commands";
 import { resizeImage } from "@/lib/image";
 import { getMessages } from "@/lib/messages";
 import { startRecording, type Recording } from "@/lib/recorder";
@@ -10,8 +11,10 @@ import { toWav } from "@/lib/wav";
 
 type Status = "idle" | "starting" | "aiming" | "listening" | "thinking" | "answered" | "error";
 type Turn = { question: string; answer: string };
+type Mode = "question" | "followUp";
 
 const MAX_RECORDING_MS = 20_000;
+const AIM_DELAY_MS = 4_000;
 
 const subscribe = () => () => {};
 const getLanguage = () => navigator.language;
@@ -41,8 +44,12 @@ export default function Assistant() {
   const historyRef = useRef<Turn[]>([]);
   const recordingRef = useRef<Recording | null>(null);
   const timerRef = useRef<number | undefined>(undefined);
+  const aimTimerRef = useRef<number | undefined>(undefined);
+  const modeRef = useRef<Mode>("question");
+  const turnRef = useRef(0);
   const [status, setStatus] = useState<Status>("idle");
   const [text, setText] = useState("");
+  const [answer, setAnswer] = useState("");
 
   useEffect(() => {
     document.documentElement.lang = language;
@@ -53,8 +60,23 @@ export default function Assistant() {
     return speak(value, language);
   }
 
+  function cancelRecording() {
+    const recording = recordingRef.current;
+    recordingRef.current = null;
+    window.clearTimeout(timerRef.current);
+    void recording?.stop();
+  }
+
+  function interrupt() {
+    stopSpeaking();
+    cancelRecording();
+    window.clearTimeout(aimTimerRef.current);
+    turnRef.current += 1;
+  }
+
   async function describe(question: string) {
     const image = imageRef.current;
+    const turn = turnRef.current;
     try {
       if (!image) throw new Error("No photo to describe");
       const form = new FormData();
@@ -72,8 +94,13 @@ export default function Assistant() {
 
       const data: { answer: string } = await response.json();
       historyRef.current = [...historyRef.current, { question, answer: data.answer }];
+      setAnswer(data.answer);
       setStatus("answered");
-      say(data.answer);
+      await speak(data.answer, language);
+      if (turnRef.current !== turn) return;
+      await speak(messages.followUpPrompt, language);
+      if (turnRef.current !== turn) return;
+      await listen("followUp");
     } catch {
       setStatus("error");
       say(messages.error);
@@ -89,20 +116,62 @@ export default function Assistant() {
     setStatus("thinking");
     say(messages.thinking);
     const question = await transcribe(await recording.stop());
+
+    if (modeRef.current === "followUp") {
+      if (!question) {
+        setStatus("answered");
+        void speak(messages.standBy, language);
+        return;
+      }
+      if (isNewPhotoCommand(question)) {
+        takeNewPhoto();
+        return;
+      }
+    }
     await describe(question ?? messages.defaultQuestion);
   }
 
-  async function beginListening() {
-    setStatus("listening");
-    await say(messages.askQuestion);
+  function handleNoSpeech() {
+    if (modeRef.current === "question") {
+      void finishQuestion();
+      return;
+    }
+    cancelRecording();
+    setStatus("answered");
+    void speak(messages.standBy, language);
+  }
+
+  async function listen(mode: Mode) {
+    const turn = turnRef.current;
+    modeRef.current = mode;
     try {
-      recordingRef.current = await startRecording();
+      const recording = await startRecording({
+        onSilence: () => void finishQuestion(),
+        onNoSpeech: handleNoSpeech,
+      });
+      if (turnRef.current !== turn) {
+        void recording.stop();
+        return;
+      }
+      recordingRef.current = recording;
       timerRef.current = window.setTimeout(finishQuestion, MAX_RECORDING_MS);
     } catch {
+      if (mode === "followUp") {
+        setStatus("answered");
+        return;
+      }
       setStatus("thinking");
       await say(messages.noMicrophone);
       await describe(messages.defaultQuestion);
     }
+  }
+
+  async function beginListening(mode: Mode) {
+    const turn = turnRef.current;
+    setStatus("listening");
+    await say(messages.askQuestion);
+    if (turnRef.current !== turn) return;
+    await listen(mode);
   }
 
   async function handlePhoto(event: ChangeEvent<HTMLInputElement>) {
@@ -118,7 +187,7 @@ export default function Assistant() {
       say(messages.error);
       return;
     }
-    await beginListening();
+    await beginListening("question");
   }
 
   async function openCamera() {
@@ -126,22 +195,30 @@ export default function Assistant() {
     if (!video) return;
     setText("");
     setStatus("starting");
+    const turn = turnRef.current;
+    let camera: Camera;
     try {
-      cameraRef.current = await startCamera(video);
+      camera = await startCamera(video);
     } catch {
       cameraFailedRef.current = true;
       setStatus("error");
       say(messages.noCamera);
       return;
     }
+    cameraRef.current = camera;
     setStatus("aiming");
-    say(messages.aimCamera);
+    await say(messages.aimCamera);
+    if (turnRef.current !== turn) return;
+    aimTimerRef.current = window.setTimeout(() => {
+      if (cameraRef.current === camera) void capturePhoto();
+    }, AIM_DELAY_MS);
   }
 
   async function capturePhoto() {
     const camera = cameraRef.current;
     if (!camera) return;
     cameraRef.current = null;
+    window.clearTimeout(aimTimerRef.current);
     try {
       imageRef.current = await camera.capture();
       historyRef.current = [];
@@ -152,11 +229,11 @@ export default function Assistant() {
     } finally {
       camera.stop();
     }
-    await beginListening();
+    await beginListening("question");
   }
 
   function takeNewPhoto() {
-    stopSpeaking();
+    interrupt();
     if (cameraFailedRef.current || !navigator.mediaDevices?.getUserMedia) {
       inputRef.current?.click();
       return;
@@ -165,8 +242,8 @@ export default function Assistant() {
   }
 
   function askAnother() {
-    stopSpeaking();
-    void beginListening();
+    interrupt();
+    void beginListening("followUp");
   }
 
   function handleTap() {
@@ -197,7 +274,7 @@ export default function Assistant() {
       {status === "answered" ? (
         <>
           <p className="flex flex-1 basis-1/3 items-center justify-center overflow-y-auto p-6 text-center text-3xl leading-snug text-yellow-300">
-            {text}
+            {answer}
           </p>
           <button
             type="button"
