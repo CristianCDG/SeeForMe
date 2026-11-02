@@ -5,7 +5,7 @@ import { releaseCamera, startCamera, type Camera } from "@/lib/camera";
 import { isNewPhotoCommand, isRepeatCommand } from "@/lib/commands";
 import { resizeImage } from "@/lib/image";
 import { getMessages } from "@/lib/messages";
-import { releaseMicrophone, startRecording, type Recording } from "@/lib/recorder";
+import { startRecording, type Recording } from "@/lib/recorder";
 import { speak, stopSpeaking } from "@/lib/speech";
 import { keepAwake } from "@/lib/wakeLock";
 import { toWav } from "@/lib/wav";
@@ -169,7 +169,6 @@ export default function Assistant() {
     idleListensRef.current += 1;
     if (idleListensRef.current > MAX_IDLE_LISTENS) {
       releaseCamera();
-      releaseMicrophone();
       await speak(messages.sleeping, language);
       return;
     }
