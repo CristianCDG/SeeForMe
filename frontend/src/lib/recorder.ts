@@ -12,8 +12,23 @@ export type RecordingHandlers = {
   onNoSpeech: () => void;
 };
 
+let cachedStream: MediaStream | null = null;
+
+async function getMicrophone(): Promise<MediaStream> {
+  if (cachedStream?.getTracks().some((track) => track.readyState === "live")) {
+    return cachedStream;
+  }
+  cachedStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+  return cachedStream;
+}
+
+export function releaseMicrophone() {
+  cachedStream?.getTracks().forEach((track) => track.stop());
+  cachedStream = null;
+}
+
 export async function startRecording(handlers: RecordingHandlers): Promise<Recording> {
-  const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+  const stream = await getMicrophone();
   const recorder = new MediaRecorder(stream);
   const chunks: Blob[] = [];
 
@@ -58,7 +73,6 @@ export async function startRecording(handlers: RecordingHandlers): Promise<Recor
         window.clearInterval(watcher);
         void context.close();
         recorder.onstop = () => {
-          stream.getTracks().forEach((track) => track.stop());
           resolve(new Blob(chunks, { type: recorder.mimeType }));
         };
         recorder.stop();

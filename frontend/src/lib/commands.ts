@@ -5,6 +5,11 @@ const NEW_PHOTO_PATTERNS = [
   /\b(take|snap)\s+(a\s+)?(photo|picture)\b/,
 ];
 
+const REPEAT_PATTERNS = [
+  /\b(repite|repetir|repiteme|repitelo|otra vez|que dijiste)\b/,
+  /\b(repeat|say that again|say it again|once more|what did you say)\b/,
+];
+
 function normalize(text: string) {
   return text
     .toLowerCase()
@@ -15,4 +20,9 @@ function normalize(text: string) {
 export function isNewPhotoCommand(transcript: string) {
   const text = normalize(transcript);
   return NEW_PHOTO_PATTERNS.some((pattern) => pattern.test(text));
+}
+
+export function isRepeatCommand(transcript: string) {
+  const text = normalize(transcript);
+  return REPEAT_PATTERNS.some((pattern) => pattern.test(text));
 }

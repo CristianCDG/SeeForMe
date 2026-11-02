@@ -1,12 +1,13 @@
 "use client";
 
 import { useEffect, useRef, useState, useSyncExternalStore, type ChangeEvent } from "react";
-import { startCamera, type Camera } from "@/lib/camera";
-import { isNewPhotoCommand } from "@/lib/commands";
+import { releaseCamera, startCamera, type Camera } from "@/lib/camera";
+import { isNewPhotoCommand, isRepeatCommand } from "@/lib/commands";
 import { resizeImage } from "@/lib/image";
 import { getMessages } from "@/lib/messages";
-import { startRecording, type Recording } from "@/lib/recorder";
+import { releaseMicrophone, startRecording, type Recording } from "@/lib/recorder";
 import { speak, stopSpeaking } from "@/lib/speech";
+import { keepAwake } from "@/lib/wakeLock";
 import { toWav } from "@/lib/wav";
 
 type Status = "idle" | "starting" | "aiming" | "listening" | "thinking" | "answered" | "error";
@@ -15,6 +16,7 @@ type Mode = "question" | "followUp";
 
 const MAX_RECORDING_MS = 20_000;
 const AIM_DELAY_MS = 4_000;
+const MAX_IDLE_LISTENS = 15;
 
 const subscribe = () => () => {};
 const getLanguage = () => navigator.language;
@@ -47,6 +49,7 @@ export default function Assistant() {
   const aimTimerRef = useRef<number | undefined>(undefined);
   const modeRef = useRef<Mode>("question");
   const turnRef = useRef(0);
+  const idleListensRef = useRef(0);
   const [status, setStatus] = useState<Status>("idle");
   const [text, setText] = useState("");
   const [answer, setAnswer] = useState("");
@@ -86,14 +89,14 @@ export default function Assistant() {
 
       const response = await fetch("/api/describe", { method: "POST", body: form });
       if (response.status === 429) {
-        setStatus("error");
-        say(messages.busy);
+        await recover(messages.busy, turn);
         return;
       }
       if (!response.ok) throw new Error(`Request failed with status ${response.status}`);
 
       const data: { answer: string } = await response.json();
       historyRef.current = [...historyRef.current, { question, answer: data.answer }];
+      idleListensRef.current = 0;
       setAnswer(data.answer);
       setStatus("answered");
       await speak(data.answer, language);
@@ -102,9 +105,28 @@ export default function Assistant() {
       if (turnRef.current !== turn) return;
       await listen("followUp");
     } catch {
-      setStatus("error");
-      say(messages.error);
+      await recover(messages.error, turn);
     }
+  }
+
+  async function recover(message: string, turn: number) {
+    setStatus("error");
+    await say(message);
+    if (turnRef.current !== turn) return;
+    await listen("followUp");
+  }
+
+  function restingStatus(): Status {
+    return historyRef.current.length > 0 ? "answered" : "error";
+  }
+
+  async function repeatLastAnswer(last: Turn) {
+    const turn = turnRef.current;
+    setAnswer(last.answer);
+    setStatus("answered");
+    await speak(last.answer, language);
+    if (turnRef.current !== turn) return;
+    await listen("followUp");
   }
 
   async function finishQuestion() {
@@ -119,26 +141,39 @@ export default function Assistant() {
 
     if (modeRef.current === "followUp") {
       if (!question) {
-        setStatus("answered");
-        void speak(messages.standBy, language);
+        setStatus(restingStatus());
+        await listen("followUp");
         return;
       }
-      if (isNewPhotoCommand(question)) {
+      if (isNewPhotoCommand(question) || !imageRef.current) {
         takeNewPhoto();
         return;
       }
+      const last = historyRef.current.at(-1);
+      if (last && isRepeatCommand(question)) {
+        await repeatLastAnswer(last);
+        return;
+      }
+      idleListensRef.current = 0;
     }
     await describe(question ?? messages.defaultQuestion);
   }
 
-  function handleNoSpeech() {
+  async function handleNoSpeech() {
     if (modeRef.current === "question") {
       void finishQuestion();
       return;
     }
     cancelRecording();
-    setStatus("answered");
-    void speak(messages.standBy, language);
+    setStatus(restingStatus());
+    idleListensRef.current += 1;
+    if (idleListensRef.current > MAX_IDLE_LISTENS) {
+      releaseCamera();
+      releaseMicrophone();
+      await speak(messages.sleeping, language);
+      return;
+    }
+    await listen("followUp");
   }
 
   async function listen(mode: Mode) {
@@ -147,7 +182,7 @@ export default function Assistant() {
     try {
       const recording = await startRecording({
         onSilence: () => void finishQuestion(),
-        onNoSpeech: handleNoSpeech,
+        onNoSpeech: () => void handleNoSpeech(),
       });
       if (turnRef.current !== turn) {
         void recording.stop();
@@ -157,7 +192,7 @@ export default function Assistant() {
       timerRef.current = window.setTimeout(finishQuestion, MAX_RECORDING_MS);
     } catch {
       if (mode === "followUp") {
-        setStatus("answered");
+        setStatus(restingStatus());
         return;
       }
       setStatus("thinking");
@@ -183,8 +218,7 @@ export default function Assistant() {
       imageRef.current = await resizeImage(file);
       historyRef.current = [];
     } catch {
-      setStatus("error");
-      say(messages.error);
+      await recover(messages.photoError, turnRef.current);
       return;
     }
     await beginListening("question");
@@ -223,17 +257,17 @@ export default function Assistant() {
       imageRef.current = await camera.capture();
       historyRef.current = [];
     } catch {
-      setStatus("error");
-      say(messages.error);
-      return;
-    } finally {
       camera.stop();
+      await recover(messages.photoError, turnRef.current);
+      return;
     }
+    camera.stop();
     await beginListening("question");
   }
 
   function takeNewPhoto() {
     interrupt();
+    keepAwake();
     if (cameraFailedRef.current || !navigator.mediaDevices?.getUserMedia) {
       inputRef.current?.click();
       return;
