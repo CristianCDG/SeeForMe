@@ -302,7 +302,7 @@ export default function Assistant() {
         muted
         tabIndex={-1}
         aria-hidden="true"
-        className={`absolute inset-0 h-full w-full object-cover ${status === "aiming" ? "" : "opacity-0"}`}
+        className={`pointer-events-none absolute inset-0 h-full w-full object-cover ${status === "aiming" ? "" : "opacity-0"}`}
       />
       {status === "answered" ? (
         <>
