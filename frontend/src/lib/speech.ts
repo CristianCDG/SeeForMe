@@ -1,3 +1,5 @@
+import { logDebug } from "@/lib/debug";
+
 const MIN_SPEECH_TIMEOUT_MS = 8_000;
 const SPEECH_MS_PER_CHARACTER = 120;
 const VOICES_WAIT_MS = 1_000;
@@ -43,22 +45,31 @@ export async function speak(text: string, language: string): Promise<void> {
   if (engine.speaking || engine.pending) engine.cancel();
   engine.resume();
 
-  const voice = pickVoice(await loadVoices(engine), language);
+  const voices = await loadVoices(engine);
+  const voice = pickVoice(voices, language);
+  logDebug(`speak "${text.slice(0, 24)}" lang=${language} voices=${voices.length} voice=${voice?.name ?? "none"}`);
 
   return new Promise((resolve) => {
     const utterance = new SpeechSynthesisUtterance(text);
     utterance.lang = voice ? voice.lang : language;
     if (voice) utterance.voice = voice;
-    const timeout = window.setTimeout(
-      resolve,
-      Math.max(MIN_SPEECH_TIMEOUT_MS, text.length * SPEECH_MS_PER_CHARACTER),
-    );
+    const timeout = window.setTimeout(() => {
+      logDebug("speech timeout");
+      resolve();
+    }, Math.max(MIN_SPEECH_TIMEOUT_MS, text.length * SPEECH_MS_PER_CHARACTER));
     const finish = () => {
       window.clearTimeout(timeout);
       resolve();
     };
-    utterance.onend = finish;
-    utterance.onerror = finish;
+    utterance.onstart = () => logDebug("speech start");
+    utterance.onend = () => {
+      logDebug("speech end");
+      finish();
+    };
+    utterance.onerror = (event) => {
+      logDebug(`speech error ${event.error}`);
+      finish();
+    };
     engine.speak(utterance);
   });
 }

@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState, useSyncExternalStore, type ChangeEvent } from "react";
 import { releaseCamera, startCamera, type Camera } from "@/lib/camera";
 import { isNewPhotoCommand, isRepeatCommand } from "@/lib/commands";
+import { getDebugLines, getServerDebugLines, subscribeDebug } from "@/lib/debug";
 import { resizeImage } from "@/lib/image";
 import { getMessages } from "@/lib/messages";
 import { startRecording, type Recording } from "@/lib/recorder";
@@ -21,6 +22,8 @@ const MAX_IDLE_LISTENS = 15;
 const subscribe = () => () => {};
 const getLanguage = () => navigator.language;
 const getServerLanguage = () => "en";
+const getDebugEnabled = () => new URLSearchParams(window.location.search).has("debug");
+const getServerDebugEnabled = () => false;
 
 async function transcribe(recording: Blob): Promise<string | null> {
   try {
@@ -38,6 +41,8 @@ async function transcribe(recording: Blob): Promise<string | null> {
 export default function Assistant() {
   const language = useSyncExternalStore(subscribe, getLanguage, getServerLanguage);
   const messages = getMessages(language);
+  const debugEnabled = useSyncExternalStore(subscribe, getDebugEnabled, getServerDebugEnabled);
+  const debugLines = useSyncExternalStore(subscribeDebug, getDebugLines, getServerDebugLines);
   const inputRef = useRef<HTMLInputElement>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
   const cameraRef = useRef<Camera | null>(null);
@@ -344,6 +349,14 @@ export default function Assistant() {
             </span>
           )}
         </button>
+      )}
+      {debugEnabled && (
+        <pre
+          aria-hidden="true"
+          className="pointer-events-none fixed inset-x-0 bottom-0 z-50 max-h-1/3 overflow-hidden bg-white p-2 text-xs text-black"
+        >
+          {debugLines.join("\n")}
+        </pre>
       )}
       <input
         ref={inputRef}
