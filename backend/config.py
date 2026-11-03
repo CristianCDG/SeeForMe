@@ -10,7 +10,7 @@ class Settings(BaseSettings):
     meta_model: str = "muse-spark-1.3"
     meta_reasoning_effort: str = "low"
     meta_asr_model: str = "muse-voice-transcribe-1.0"
-    rate_limit_requests: int = 30
+    rate_limit_requests: int = 60
     rate_limit_window_seconds: int = 60
     cors_origins: list[str] = ["http://localhost:3000"]
 

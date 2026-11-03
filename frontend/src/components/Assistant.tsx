@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState, useSyncExternalStore, type ChangeEvent } from "react";
 import { releaseCamera, startCamera, type Camera } from "@/lib/camera";
-import { isNewPhotoCommand, isRepeatCommand } from "@/lib/commands";
+import { isNewPhotoCommand, isRepeatCommand, parseFindCommand } from "@/lib/commands";
 import { getDebugLines, getServerDebugLines, subscribeDebug } from "@/lib/debug";
 import { resizeImage } from "@/lib/image";
 import { getMessages } from "@/lib/messages";
@@ -11,7 +11,7 @@ import { speak, stopSpeaking, unlockSpeech } from "@/lib/speech";
 import { keepAwake } from "@/lib/wakeLock";
 import { toWav } from "@/lib/wav";
 
-type Status = "idle" | "starting" | "aiming" | "listening" | "thinking" | "answered" | "error";
+type Status = "idle" | "starting" | "aiming" | "searching" | "listening" | "thinking" | "answered" | "error";
 type Turn = { question: string; answer: string };
 type Mode = "question" | "followUp";
 
@@ -19,6 +19,8 @@ const MAX_RECORDING_MS = 20_000;
 const AIM_DELAY_MS = 4_000;
 const MAX_IDLE_LISTENS = 15;
 const MAX_RETAKES = 2;
+const MAX_SEARCH_ATTEMPTS = 8;
+const SEARCH_SETTLE_MS = 1_500;
 
 const subscribe = () => () => {};
 const getLanguage = () => navigator.language;
@@ -34,6 +36,24 @@ async function transcribe(recording: Blob): Promise<string | null> {
     if (!response.ok) return null;
     const data: { text: string } = await response.json();
     return data.text.trim() || null;
+  } catch {
+    return null;
+  }
+}
+
+type LocateResult = { found: boolean; guidance: string };
+
+const wait = (ms: number) => new Promise<void>((resolve) => window.setTimeout(resolve, ms));
+
+async function locate(photo: Blob, target: string): Promise<LocateResult | "busy" | null> {
+  try {
+    const form = new FormData();
+    form.append("image", photo, "frame.jpg");
+    form.append("target", target);
+    const response = await fetch("/api/locate", { method: "POST", body: form });
+    if (response.status === 429) return "busy";
+    if (!response.ok) return null;
+    return await response.json();
   } catch {
     return null;
   }
@@ -158,6 +178,70 @@ export default function Assistant() {
     await listen("followUp");
   }
 
+  async function startSearch(target: string) {
+    const video = videoRef.current;
+    if (!video) return;
+    interrupt();
+    keepAwake();
+    const turn = turnRef.current;
+    setText("");
+    setStatus("starting");
+
+    let camera: Camera;
+    try {
+      camera = await startCamera(video);
+    } catch {
+      await recover(messages.error, turn);
+      return;
+    }
+
+    try {
+      setStatus("searching");
+      await say(messages.searching);
+      for (let attempt = 0; attempt < MAX_SEARCH_ATTEMPTS; attempt++) {
+        if (turnRef.current !== turn) return;
+        await wait(SEARCH_SETTLE_MS);
+        if (turnRef.current !== turn) return;
+
+        const photo = await camera.capture();
+        const result = await locate(photo, target);
+        if (turnRef.current !== turn) return;
+        if (result === "busy") {
+          await recover(messages.busy, turn);
+          return;
+        }
+        if (!result) {
+          await recover(messages.error, turn);
+          return;
+        }
+
+        if (result.found) {
+          imageRef.current = photo;
+          historyRef.current = [{ question: target, answer: result.guidance }];
+          retakesRef.current = 0;
+          idleListensRef.current = 0;
+          setAnswer(result.guidance);
+          setStatus("answered");
+          await speak(result.guidance, language);
+          if (turnRef.current !== turn) return;
+          await listen("followUp");
+          return;
+        }
+        await say(result.guidance);
+      }
+
+      if (turnRef.current !== turn) return;
+      setStatus(restingStatus());
+      await speak(messages.notFound, language);
+      if (turnRef.current !== turn) return;
+      await listen("followUp");
+    } catch {
+      await recover(messages.error, turn);
+    } finally {
+      camera.stop();
+    }
+  }
+
   async function finishQuestion() {
     const recording = recordingRef.current;
     if (!recording) return;
@@ -167,6 +251,12 @@ export default function Assistant() {
     setStatus("thinking");
     say(messages.thinking);
     const question = await transcribe(await recording.stop());
+
+    const target = question ? parseFindCommand(question) : null;
+    if (target) {
+      await startSearch(target);
+      return;
+    }
 
     if (modeRef.current === "followUp") {
       if (!question) {
@@ -313,6 +403,12 @@ export default function Assistant() {
   function handleTap() {
     unlockSpeech();
     if (status === "thinking" || status === "starting") return;
+    if (status === "searching") {
+      interrupt();
+      setStatus(restingStatus());
+      void listen("followUp");
+      return;
+    }
     if (status === "aiming") {
       void capturePhoto();
       return;
@@ -334,7 +430,7 @@ export default function Assistant() {
         muted
         tabIndex={-1}
         aria-hidden="true"
-        className={`pointer-events-none absolute inset-0 h-full w-full object-cover ${status === "aiming" ? "" : "opacity-0"}`}
+        className={`pointer-events-none absolute inset-0 h-full w-full object-cover ${status === "aiming" || status === "searching" ? "" : "opacity-0"}`}
       />
       {status === "answered" ? (
         <>
@@ -361,7 +457,7 @@ export default function Assistant() {
           type="button"
           onClick={handleTap}
           aria-busy={status === "thinking" || status === "starting"}
-          className={`relative flex flex-1 w-full flex-col items-center justify-center gap-6 overflow-y-auto p-6 text-center text-yellow-300 focus-visible:outline-8 focus-visible:outline-white ${status === "aiming" ? "bg-black/60" : "bg-black"}`}
+          className={`relative flex flex-1 w-full flex-col items-center justify-center gap-6 overflow-y-auto p-6 text-center text-yellow-300 focus-visible:outline-8 focus-visible:outline-white ${status === "aiming" || status === "searching" ? "bg-black/60" : "bg-black"}`}
         >
           <span className="text-5xl font-bold">SeeForMe</span>
           <span className="max-w-2xl text-3xl leading-snug">
