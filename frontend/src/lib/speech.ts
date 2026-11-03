@@ -3,6 +3,7 @@ import { logDebug } from "@/lib/debug";
 const MIN_SPEECH_TIMEOUT_MS = 8_000;
 const SPEECH_MS_PER_CHARACTER = 120;
 const VOICES_WAIT_MS = 1_000;
+const START_WAIT_MS = 2_000;
 
 function synthesis() {
   if (typeof window === "undefined" || !("speechSynthesis" in window)) {
@@ -50,28 +51,62 @@ export async function speak(text: string, language: string): Promise<void> {
   logDebug(`speak "${text.slice(0, 24)}" lang=${language} voices=${voices.length} voice=${voice?.name ?? "none"}`);
 
   return new Promise((resolve) => {
-    const utterance = new SpeechSynthesisUtterance(text);
-    utterance.lang = voice ? voice.lang : language;
-    if (voice) utterance.voice = voice;
+    let current: SpeechSynthesisUtterance | null = null;
+    let started = false;
+    let done = false;
+
     const timeout = window.setTimeout(() => {
       logDebug("speech timeout");
-      resolve();
+      finish();
     }, Math.max(MIN_SPEECH_TIMEOUT_MS, text.length * SPEECH_MS_PER_CHARACTER));
-    const finish = () => {
+
+    function finish() {
+      done = true;
       window.clearTimeout(timeout);
       resolve();
-    };
-    utterance.onstart = () => logDebug("speech start");
-    utterance.onend = () => {
-      logDebug("speech end");
-      finish();
-    };
-    utterance.onerror = (event) => {
-      logDebug(`speech error ${event.error}`);
-      finish();
-    };
-    engine.speak(utterance);
+    }
+
+    function run(selected: SpeechSynthesisVoice | undefined) {
+      const utterance = new SpeechSynthesisUtterance(text);
+      utterance.lang = selected ? selected.lang : language;
+      if (selected) utterance.voice = selected;
+      current = utterance;
+      utterance.onstart = () => {
+        started = true;
+        logDebug("speech start");
+      };
+      utterance.onend = () => {
+        if (current !== utterance) return;
+        logDebug("speech end");
+        finish();
+      };
+      utterance.onerror = (event) => {
+        if (current !== utterance) return;
+        logDebug(`speech error ${event.error}`);
+        finish();
+      };
+      engine!.speak(utterance);
+
+      if (selected) {
+        window.setTimeout(() => {
+          if (started || done) return;
+          logDebug("no start, retrying with default voice");
+          engine!.cancel();
+          run(undefined);
+        }, START_WAIT_MS);
+      }
+    }
+
+    run(voice);
   });
+}
+
+export function unlockSpeech() {
+  const engine = synthesis();
+  if (!engine) return;
+  const utterance = new SpeechSynthesisUtterance(" ");
+  utterance.volume = 0;
+  engine.speak(utterance);
 }
 
 export function stopSpeaking() {

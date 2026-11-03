@@ -7,7 +7,7 @@ import { getDebugLines, getServerDebugLines, subscribeDebug } from "@/lib/debug"
 import { resizeImage } from "@/lib/image";
 import { getMessages } from "@/lib/messages";
 import { startRecording, type Recording } from "@/lib/recorder";
-import { speak, stopSpeaking } from "@/lib/speech";
+import { speak, stopSpeaking, unlockSpeech } from "@/lib/speech";
 import { keepAwake } from "@/lib/wakeLock";
 import { toWav } from "@/lib/wav";
 
@@ -270,6 +270,7 @@ export default function Assistant() {
   }
 
   function takeNewPhoto() {
+    unlockSpeech();
     interrupt();
     keepAwake();
     if (cameraFailedRef.current || !navigator.mediaDevices?.getUserMedia) {
@@ -285,6 +286,7 @@ export default function Assistant() {
   }
 
   function handleTap() {
+    unlockSpeech();
     if (status === "thinking" || status === "starting") return;
     if (status === "aiming") {
       void capturePhoto();
