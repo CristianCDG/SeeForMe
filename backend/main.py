@@ -22,6 +22,8 @@ ALLOWED_AUDIO_TYPES = ["audio/wav", "audio/x-wav", "audio/wave"]
 MAX_AUDIO_BYTES = 5 * 1024 * 1024
 MAX_IMAGE_BYTES = 5 * 1024 * 1024
 MAX_HISTORY_TURNS = 6
+RETAKE_MARKER = "[RETAKE]"
+RETAKE_RULE = " If the photo is too blurry, too dark, or the object or document is cut off so that you cannot answer reliably, start your reply with the exact marker [RETAKE] followed by one short sentence telling the user how to move the phone, for example move it up, down, left or right, step back, or find more light. Otherwise never use that marker."
 GUARDED = [Depends(verify_api_key), Depends(enforce_rate_limit)]
 
 
@@ -58,6 +60,7 @@ def describe(
     image: UploadFile,
     question: str = Form("Describe what is in front of me"),
     history: str = Form("[]"),
+    allow_retake: bool = Form(True),
 ):
     try:
         turns = history_adapter.validate_json(history)
@@ -76,11 +79,14 @@ def describe(
     encoded = base64.b64encode(data).decode()
     data_url = f"data:{image.content_type};base64,{encoded}"
 
+    can_retake = allow_retake and not turns
+    instructions = MODEL_INSTRUCTIONS + (RETAKE_RULE if can_retake else "")
+
     settings = get_settings()
     try:
         resp = get_meta_client().responses.create(
             model=settings.meta_model,
-            instructions=MODEL_INSTRUCTIONS,
+            instructions=instructions,
             input=[
                 *messages,
                 {
@@ -103,7 +109,10 @@ def describe(
     except APIStatusError:
         raise HTTPException(status_code=502, detail="Meta returned an error")
 
-    return {"answer": resp.output_text}
+    answer = resp.output_text.strip()
+    retake = can_retake and answer.startswith(RETAKE_MARKER)
+    answer = answer.replace(RETAKE_MARKER, "").strip()
+    return {"answer": answer, "retake": retake}
 
 @app.post("/ai/transcribe", dependencies=GUARDED)
 def transcribe(audio: UploadFile):

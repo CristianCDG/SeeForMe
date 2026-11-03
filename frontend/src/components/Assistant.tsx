@@ -18,6 +18,7 @@ type Mode = "question" | "followUp";
 const MAX_RECORDING_MS = 20_000;
 const AIM_DELAY_MS = 4_000;
 const MAX_IDLE_LISTENS = 15;
+const MAX_RETAKES = 2;
 
 const subscribe = () => () => {};
 const getLanguage = () => navigator.language;
@@ -55,6 +56,8 @@ export default function Assistant() {
   const modeRef = useRef<Mode>("question");
   const turnRef = useRef(0);
   const idleListensRef = useRef(0);
+  const retakesRef = useRef(0);
+  const pendingQuestionRef = useRef<string | null>(null);
   const [status, setStatus] = useState<Status>("idle");
   const [text, setText] = useState("");
   const [answer, setAnswer] = useState("");
@@ -91,6 +94,7 @@ export default function Assistant() {
       form.append("image", image, "photo.jpg");
       form.append("question", question);
       form.append("history", JSON.stringify(historyRef.current));
+      form.append("allow_retake", retakesRef.current < MAX_RETAKES ? "true" : "false");
 
       const response = await fetch("/api/describe", { method: "POST", body: form });
       if (response.status === 429) {
@@ -99,7 +103,16 @@ export default function Assistant() {
       }
       if (!response.ok) throw new Error(`Request failed with status ${response.status}`);
 
-      const data: { answer: string } = await response.json();
+      const data: { answer: string; retake?: boolean } = await response.json();
+      if (data.retake) {
+        retakesRef.current += 1;
+        pendingQuestionRef.current = question;
+        await say(data.answer);
+        if (turnRef.current !== turn) return;
+        takeNewPhoto();
+        return;
+      }
+      retakesRef.current = 0;
       historyRef.current = [...historyRef.current, { question, answer: data.answer }];
       idleListensRef.current = 0;
       setAnswer(data.answer);
@@ -115,10 +128,21 @@ export default function Assistant() {
   }
 
   async function recover(message: string, turn: number) {
+    pendingQuestionRef.current = null;
     setStatus("error");
     await say(message);
     if (turnRef.current !== turn) return;
     await listen("followUp");
+  }
+
+  async function afterPhoto() {
+    const pending = pendingQuestionRef.current;
+    if (pending) {
+      pendingQuestionRef.current = null;
+      await describe(pending);
+      return;
+    }
+    await beginListening("question");
   }
 
   function restingStatus(): Status {
@@ -225,7 +249,7 @@ export default function Assistant() {
       await recover(messages.photoError, turnRef.current);
       return;
     }
-    await beginListening("question");
+    await afterPhoto();
   }
 
   async function openCamera() {
@@ -239,6 +263,7 @@ export default function Assistant() {
       camera = await startCamera(video);
     } catch {
       cameraFailedRef.current = true;
+      pendingQuestionRef.current = null;
       setStatus("error");
       say(messages.noCamera);
       return;
@@ -266,7 +291,7 @@ export default function Assistant() {
       return;
     }
     camera.stop();
-    await beginListening("question");
+    await afterPhoto();
   }
 
   function takeNewPhoto() {
