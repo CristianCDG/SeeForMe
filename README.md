@@ -71,6 +71,10 @@ Camera and microphone only work on `localhost` or over HTTPS, so testing on a ph
 - The rate limit lives in memory, which is fine for one instance but would need a shared store if the backend ran on several.
 - The phone keeps its screen on while a session is running, and the camera stays open between photos so the browser doesn't ask for permission again each time.
 
+## License
+
+MIT, see the LICENSE file.
+
 ## Where I'd take it next
 
 The part that matters most is the backend, and it doesn't know anything about phones. It takes an image and a question and returns text. The web app is just the first client for it, so the next steps are mostly about adding other clients.
