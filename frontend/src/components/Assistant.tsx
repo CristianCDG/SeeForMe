@@ -215,19 +215,20 @@ export default function Assistant() {
           return;
         }
 
+        const guidance = result.guidance || (result.found ? messages.foundIt : messages.keepSearching);
         if (result.found) {
           imageRef.current = photo;
-          historyRef.current = [{ question: target, answer: result.guidance }];
+          historyRef.current = [{ question: target, answer: guidance }];
           retakesRef.current = 0;
           idleListensRef.current = 0;
-          setAnswer(result.guidance);
+          setAnswer(guidance);
           setStatus("answered");
-          await speak(result.guidance, language);
+          await speak(guidance, language);
           if (turnRef.current !== turn) return;
           await listen("followUp");
           return;
         }
-        await say(result.guidance);
+        await say(guidance);
       }
 
       if (turnRef.current !== turn) return;

@@ -8,6 +8,7 @@ from meta_client import get_meta_client
 from pydantic import BaseModel, Field, ValidationError, TypeAdapter
 import base64
 import json
+import re
 import httpx
 
 app = FastAPI()
@@ -24,6 +25,8 @@ MAX_IMAGE_BYTES = 5 * 1024 * 1024
 MAX_HISTORY_TURNS = 6
 RETAKE_MARKER = "[RETAKE]"
 RETAKE_RULE = " If the photo is too blurry, too dark, or the object or document is cut off so that you cannot answer reliably, start your reply with the exact marker [RETAKE] followed by one short sentence telling the user how to move the phone, for example move it up, down, left or right, step back, or find more light. Otherwise never use that marker."
+FOUND_PATTERN = re.compile(r'"found"\s*:\s*(true|false)', re.IGNORECASE)
+GUIDANCE_PATTERN = re.compile(r'"guidance"\s*:\s*"((?:[^"\\]|\\.)*)')
 GUARDED = [Depends(verify_api_key), Depends(enforce_rate_limit)]
 
 
@@ -61,16 +64,31 @@ def ask_meta(**kwargs):
         raise HTTPException(status_code=502, detail="Meta returned an error")
 
 
+def decode_json_string(raw: str) -> str:
+    cleaned = re.sub(r"\\u[0-9a-fA-F]{0,3}$|\\$", "", raw)
+    try:
+        return json.loads(f'"{cleaned}"').strip()
+    except ValueError:
+        return cleaned.strip()
+
+
 def parse_locate(text: str) -> tuple[bool, str]:
     start = text.find("{")
     end = text.rfind("}")
-    try:
-        data = json.loads(text[start:end + 1])
-        found = data.get("found") is True
-        guidance = str(data.get("guidance", "")).strip()
-    except (ValueError, AttributeError):
-        return False, text.strip()
-    return found, guidance or text.strip()
+    if start != -1 and end > start:
+        try:
+            data = json.loads(text[start:end + 1])
+            return data.get("found") is True, str(data.get("guidance", "")).strip()
+        except (ValueError, AttributeError):
+            pass
+
+    found_match = FOUND_PATTERN.search(text)
+    guidance_match = GUIDANCE_PATTERN.search(text)
+    found = found_match is not None and found_match.group(1).lower() == "true"
+    guidance = decode_json_string(guidance_match.group(1)) if guidance_match else ""
+    if not guidance and not found_match and "{" not in text:
+        guidance = text.strip()
+    return found, guidance
 
 
 @app.get("/")
@@ -154,7 +172,7 @@ def locate(image: UploadFile, target: str = Form(min_length=1, max_length=200)):
             ],
         }],
         reasoning={"effort": settings.meta_reasoning_effort},
-        max_output_tokens=300,
+        max_output_tokens=1200,
     )
 
     found, guidance = parse_locate(resp.output_text)
