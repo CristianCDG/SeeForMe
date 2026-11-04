@@ -23,7 +23,10 @@ const MAX_SEARCH_ATTEMPTS = 8;
 const SEARCH_SETTLE_MS = 1_500;
 
 const subscribe = () => () => {};
-const getLanguage = () => navigator.language;
+const getLanguage = () => {
+  const requested = new URLSearchParams(window.location.search).get("lang");
+  return requested && /^[a-z]{2}(-[A-Za-z]{2})?$/.test(requested) ? requested : navigator.language;
+};
 const getServerLanguage = () => "en";
 const getDebugEnabled = () => new URLSearchParams(window.location.search).has("debug");
 const getServerDebugEnabled = () => false;
