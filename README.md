@@ -6,6 +6,8 @@ I built it for the Meta AI Developer Hackathon 2026, using Muse Spark for the vi
 
 Live demo: https://see-for-me-orpin.vercel.app (the backend sleeps when idle, so the very first request can take close to a minute)
 
+Demo video: https://www.youtube.com/watch?v=kVinzZ_qeDo
+
 ## Why voice only
 
 Most "describe my surroundings" apps still expect you to find a camera button, frame a shot, and read or tap through results. That's hard if you can't see the screen. The whole screen here is one big button, the camera opens inside the page instead of launching the phone's camera app, and everything the app needs from you after the first tap is something you can say.
